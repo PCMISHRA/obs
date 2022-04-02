@@ -11,7 +11,9 @@ public class HallId implements Serializable {
 
     private Long hallId;
 
-    private int theaterId;
+    private Integer theaterId;
+
+
 
 
 

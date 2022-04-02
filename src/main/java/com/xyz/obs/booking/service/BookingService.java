@@ -1,14 +1,14 @@
 package com.xyz.obs.booking.service;
 
 import com.xyz.obs.booking.BookingApplication;
-import com.xyz.obs.booking.bean.BookingRequest;
-import com.xyz.obs.booking.bean.BookingResult;
-import com.xyz.obs.booking.bean.ConfirmationRequest;
+import com.xyz.obs.booking.bean.*;
 import com.xyz.obs.booking.entity.Booking;
+import com.xyz.obs.booking.entity.MovieShow;
 import com.xyz.obs.booking.entity.Seat;
 import com.xyz.obs.booking.enums.Status;
 import com.xyz.obs.booking.exception.InvalidRequestException;
 import com.xyz.obs.booking.mapping.SeatMapper;
+import com.xyz.obs.booking.repository.MovieShowRepository;
 import com.xyz.obs.booking.repository.SeatRepository;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -25,51 +25,72 @@ import java.util.Map;
 @Log4j2
 public class BookingService {
     private final SeatMapper seatMapper;
-    private final SeatRepository repository;
+    private final SeatRepository seatRepository;
+    private final PriceCalculatorService priceCalculatorService;
+    private final MovieShowRepository movieShowRepository;
+
     private RabbitTemplate rabbitTemplate;
 
-    public BookingService(SeatMapper seatMapper, SeatRepository repository, RabbitTemplate rabbitTemplate) {
+    public BookingService(SeatMapper seatMapper, SeatRepository seatRepository,
+                          PriceCalculatorService priceCalculatorService, MovieShowRepository movieShowRepository, RabbitTemplate rabbitTemplate) {
         this.seatMapper = seatMapper;
 
-        this.repository = repository;
+        this.seatRepository = seatRepository;
+        this.priceCalculatorService = priceCalculatorService;
+        this.movieShowRepository = movieShowRepository;
         this.rabbitTemplate = rabbitTemplate;
     }
 
     @Transactional
     public BookingResult bookTickets(BookingRequest bookingRequest) {
-        List<Seat> seats = repository.findAllBySeatIdInAndStatus(bookingRequest.getSeats(), Status.NOT_BOOKED);
+        List<Seat> seats = seatRepository.findAllBySeatIdInAndStatus(bookingRequest.getSeats(), Status.NOT_BOOKED);
         if (bookingRequest.getSeats().size() != seats.size()) {
             // some seat all ready ouccpied;
             throw new InvalidRequestException("Some of seats are already booked");
         }
-        // TODO amout check
+      //take  Lock for seat booking
+       Long movieShowId= bookingRequest.getSeats().get(0).getMovieShowId();
+        MovieShow seatLock = movieShowRepository.findByMovieShowId(movieShowId).orElseThrow();
 
         Booking booking = new Booking();
         booking.setSeats(seats);
         booking.setBookingTime(LocalDateTime.now());
-        booking.setAmount(bookingRequest.getPaymentDetails().getAmount());
+       // grpc Call; /// call service to get price
+        booking.setAmount(priceCalculatorService.getPrice(bookingRequest.getSeats(), new UserDeatils()));
 
 
         final BookingResult bookingResult = new BookingResult();
         bookingResult.setBookingId(booking.getBookingId());
         bookingResult.setSeats(new ArrayList<>());
+        //update cache(  to keep track for a expired reqcord)
+        Long bookingId =  updateCache(seats);
         // block seats
         seats.forEach(seat -> blockSeats(seat, bookingResult));
 
-       notifyPayment(bookingResult);
 
-        repository.saveAll(seats);
+        bookingResult.setBookingId(bookingId);
+
 
         //
+        seatRepository.saveAll(seats);
         return bookingResult;
 
     }
+
+    private Long updateCache(List<Seat> seats) {
+        //TOD Impl
+
+        return null;
+    }
+
     @Transactional
-    public void confirmTickets(ConfirmationRequest confirmationRequest) {
-        
-       List<Seat> seats= confirmBooking(confirmationRequest);
-       confirmSeats(seats);
+    public ConfirmationResponse confirmTickets(ConfirmationRequest confirmationRequest) {
+        ConfirmationResponse confirmationResponse = new ConfirmationResponse();
+       confirmBooking(confirmationRequest,confirmationResponse);
+
        notifyCustomer(true);
+
+       return confirmationResponse;
        }
     @Transactional
     public void releaseTickets(ConfirmationRequest confirmationRequest) {
@@ -89,12 +110,16 @@ public class BookingService {
     private void notifyCustomer(boolean confirmed) {
     }
 
-    private void confirmSeats(List<Seat> seats) {
-    }
 
-    private List<Seat> confirmBooking(ConfirmationRequest confirmationRequest) {
-        //TOD impl
-        return new ArrayList<>();
+    private void confirmBooking(ConfirmationRequest confirmationRequest,
+                                          ConfirmationResponse confirmationResponse) {
+        //todo may payment
+        confirmationResponse.setTransactionDetails("tran1");
+        //Todo read from cache  if payment successful on basis of booking id
+        List <Seat> seats = new ArrayList<>();
+        seats.forEach(e->e.setStatus(Status.BOOKED));
+
+        confirmationResponse.setSeats(seatMapper.mapToBean(seatRepository.saveAll(seats)));
     }
 
     private void blockSeats(Seat seat, BookingResult bookingResult) {

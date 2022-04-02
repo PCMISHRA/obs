@@ -11,8 +11,8 @@ import java.math.BigDecimal;
 @Data
 
 public class Seat {
-   @EmbeddedId
-   private SeatId seatId;
+    @EmbeddedId
+    private SeatId seatId;
 
     @MapsId("movieShowId")
     @ManyToOne(optional = false)

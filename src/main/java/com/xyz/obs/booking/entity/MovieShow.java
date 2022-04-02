@@ -35,6 +35,9 @@ public class MovieShow {
     @Enumerated(EnumType.STRING)
     private Status status;
 
+    @Version
+    @Column
+    private int version;
 
 
 

@@ -9,8 +9,8 @@ import java.util.List;
 @AllArgsConstructor
 @Getter
 public class BookingRequest {
-   List<SeatId> seats;
-   private PaymentDetails paymentDetails;
+   private List<SeatId> seats;
+
    //other bookking specific details
 
 }
